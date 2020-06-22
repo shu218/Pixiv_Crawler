@@ -1,4 +1,5 @@
 from pixivpy3 import *
+import sys
 import time
 import random
 import traceback
@@ -10,42 +11,15 @@ class New_api(object):
     def require_appapi_hosts(self):
         self.api.require_appapi_hosts()
 
-    def set_accept_language(self,char):
+    def set_accept_language(self,char): 
         self.api.set_accept_language(char)            
 
     def login(self,USERNAME, PASSWORD):
         return self.api.login(USERNAME, PASSWORD)
 
-    # 返回关注列表的下一页
-    def next_page_f(self, next_url):
-         next_qs = self.api.parse_qs(next_url)
-         while True:
-             try:
-                M = self.api.user_following(**next_qs)
-             except:
- #                traceback.print_exc()
-                self.randSleep(5,0)
-             else:
-                break
-         self.randSleep()
-         return M
-
-    # 返回作品列表的下一页
-    def next_page_i(self, next_url):
-         next_qs = self.api.parse_qs(next_url)
-         while True:
-             try:
-                M = self.api.user_illusts(**next_qs)
-             except:
- #                traceback.print_exc()
-                self.randSleep(5,0)
-             else:
-                break
-         self.randSleep()
-         return M
-
     # 用户详情 
     def user_detail(self, user_id):
+        self.randSleep()
         while True:
             try:
                 M = self.api.user_detail(user_id)
@@ -53,8 +27,10 @@ class New_api(object):
  #                traceback.print_exc()
                 self.randSleep(5,0)
             else:
-                break
-        self.randSleep()
+                if M.error:
+                    return 0
+                else:
+                    break        
         return M
 
     # 用户作品列表 
@@ -70,6 +46,20 @@ class New_api(object):
         self.randSleep()
         return M
 
+    # 返回作品列表的下一页
+    def next_page_i(self, next_url):
+         next_qs = self.api.parse_qs(next_url)
+         while True:
+             try:
+                M = self.api.user_illusts(**next_qs)
+             except:
+ #                traceback.print_exc()
+                self.randSleep(5,0)
+             else:
+                break
+         self.randSleep()
+         return M
+
     # 用户收藏作品列表 
     def user_bookmarks_illust(self, user_id, restrict='public'):
         while True:
@@ -82,6 +72,20 @@ class New_api(object):
                 break
         self.randSleep()
         return M
+
+    # 返回收藏列表的下一页
+    def next_page_b(self, next_url):
+         next_qs = self.api.parse_qs(next_url)
+         while True:
+             try:
+                M = self.api.user_bookmarks_illust(**next_qs)
+             except:
+ #                traceback.print_exc()
+                self.randSleep(5,0)
+             else:
+                break
+         self.randSleep()
+         return M
 
     # 作品详情 (无需登录，同PAPI.works)
     def illust_detail(self, illust_id):
@@ -103,6 +107,33 @@ class New_api(object):
                 M = self.api.user_following(user_id, restrict='public', offset=None)
             except:
  #                traceback.print_exc()
+                self.randSleep(5,0)
+            else:
+                break
+        self.randSleep()
+        return M
+
+    # 返回关注列表的下一页
+    def next_page_f(self, next_url):
+         next_qs = self.api.parse_qs(next_url)
+         while True:
+             try:
+                M = self.api.user_following(**next_qs)
+             except:
+ #                traceback.print_exc()
+                self.randSleep(5,0)
+             else:
+                break
+         self.randSleep()
+         return M
+
+    # 获取ugoira信息
+    def ugoira_metadata(self, illust_id):
+        while True:
+            try:
+                M = self.api.ugoira_metadata(illust_id)
+            except:
+ #              traceback.print_exc()
                 self.randSleep(5,0)
             else:
                 break
@@ -200,11 +231,6 @@ class New_api(object):
     # 黑名单用户 
     def user_list(self, user_id, filter='for_ios', offset=None):
         self.api.user_list(user_id, filter='for_ios', offset=None)
-        self.randSleep()
-
-    # 获取ugoira信息
-    def ugoira_metadata(self, illust_id):
-        self.api.ugoira_metadata(illust_id)
         self.randSleep()
 
     #休眠随机的时间

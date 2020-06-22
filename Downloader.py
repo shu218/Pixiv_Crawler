@@ -1,15 +1,22 @@
 import os
 import os.path as op
 import re
-import sys
 import json
+import threading
+from PIL import Image
+import imageio
+import zipfile
 import requests
+from fake_useragent import UserAgent
 
 class Downloader(object):
     def __init__(self, path):
+        self.root = os.getcwd()
         self.Download_path = path
-        self.root = sys.path[0] 
-   
+        self.ua = UserAgent()
+        self.headers = {"User-Agent": self.ua.random}
+        self.Gif_Threads_Pool = []
+
     def Set_Path(self, path):
         self.Download_path = path
 
@@ -17,63 +24,154 @@ class Downloader(object):
         if not op.exists(self.Download_path):
             os.makedirs(self.Download_path) 
 
-    def Pic_Download(self, url, file_name, path_Add = "", s = False):
-        self.Check_Pach()
-        print("开始下载")       
-        if not s:
-            # 生成文件名和存储路径                        
-            New_Path = self.Download_path + path_Add + "{}".format(file_name)
-            # 如果文件名不重复则开始下载
-            if not op.isfile(New_Path): 
-                url = url["original_image_url"]
-                r = requests.get(url.replace("i.pximg.net","i.pixiv.cat"), stream = True)
-                if r.status_code == 200:
-                    open(New_Path, 'wb').write(r.content)
-        else:
-            for i in range(len(url)):
-                New_Path = self.Download_path + path_Add + "{}_P{}{}".format(file_name[:-4], i, file_name[-4:])
-                if not op.isfile(New_Path):
-                    u = url[i]["image_urls"]["original"]
-                    r = requests.get(u.replace("i.pximg.net","i.pixiv.cat"), stream = True)
-                    if r.status_code == 200:
-                        open(New_Path, 'wb').write(r.content)
-                print("图片集 {} 下载中，进度{}/{}。".format(file_name[:-4], i+1, len(url)))
+    def Pic_Download(self, url, file_name, Dir_Path = ""):
+        self.Check_Pach()   
+        # 生成文件名和存储路径                        
+        New_Path = self.Download_path + Dir_Path + file_name
+        # 如果文件名不重复则开始下载
+        if not op.isfile(New_Path): 
+            r = requests.get(url.replace("i.pximg.net","i.pixiv.cat"), stream = True, headers = self.headers)
+            if r.status_code == 200:
+                open(New_Path, 'wb').write(r.content)
+#                print("\n图片 {} 下载完成".format(file_name[:-4]))
 
-        print("图片 {} 下载完成".format(file_name[:-4]))
+    def Gif_Download(self, url, file_name, Dir_Path = ""):
+        self.Check_Pach()
+#        print("\n开始下载")       
+        # 生成文件名和存储路径                        
+        New_Path = self.Download_path + Dir_Path + file_name
+        New_Path_Gif = self.Download_path + Dir_Path + re.sub(r'[@][0-9]{1,}[m][s]',"",file_name[:-3]) + "gif"
+        # 如果文件名不重复则开始下载动图压缩包（zip格式）
+        if not op.isfile(New_Path) and not op.isfile(New_Path_Gif): 
+            r = requests.get(url.replace("i.pximg.net","i.pixiv.cat"), stream = True, headers = self.headers)
+            if r.status_code == 200:
+                open(New_Path, 'wb').write(r.content)
+
+        # 解压缩zip文件，拖慢下载速度，暂且取消
+        if zipfile.is_zipfile(New_Path):     
+            fz = zipfile.ZipFile(New_Path, 'r')
+            os.makedirs(New_Path[:-4] + "\\")
+            for file in fz.namelist():
+                fz.extract(file, New_Path[:-4] + "\\")  
+            fz.close()
+            # 制作gif文件
+            image_list = []
+            for i in range(len(fz.namelist())):
+                image_list.append(New_Path[:-4] + "\\" + fz.namelist()[i])
+            frames = []
+            duration = file_name[file_name.rfind("@")+1 : -6]
+            for image in image_list:
+                frames.append(imageio.imread(image))
+            imageio.mimsave(New_Path_Gif, frames, "GIF", duration = int(duration)*0.001)
+            # 删除多余文件
+            for file in image_list:
+                os.remove(file)
+            os.rmdir(New_Path[:-4] + "\\")
+            os.remove(New_Path) 
+
+#        print("\n动图 {} 下载完成".format(file_name[:-4]))
 
     def Artist_Download(self, Artist_ID):
         # 加载本地缓存文件
-        filelist = os.listdir("{}\\cache\\".format(self.root))
+        filelist = os.listdir(self.root + "\\cache\\")
         for file in filelist: 
-            if re.match(Artist_ID + ".{1,}", file):
+            if re.match("[(]" + str(Artist_ID) + "[)]" + ".{1,}", file):
                 File_Name = file
                 Illust_List = self.Load_List(File_Name)
                 Total_Illusts = len(Illust_List) - 2
-                print("成功从缓存中加载作品列表，共有 {} 副作品。\n".format(Total_Illusts))
                 break
 
-        self.Check_Pach()
+        self.Check_Pach()        
+        filelist = os.listdir(self.Download_path)
         DP = "({}){}\\".format(Illust_List[0], Illust_List[1])
+        for file in filelist: 
+            if re.match("[(]" + str(Illust_List[0]) + "[)]" + ".{1,}", file):
+                DP = file + "\\"
+                break
         isExists = op.exists(self.Download_path + DP)
         if not isExists:
             os.makedirs(self.Download_path + DP) 
             
         n = 0
         for illust in Illust_List[2:]:
-            print("剩余{}副作品未下载".format(Total_Illusts - n))
             n += 1
             if illust["is_block"]:
-                continue
+                if int(illust["Illust_Date"]) < 20180101:
+                    print("\n后续插画的完成时间过早，停止下载", end="")
+                    break
+                else:
+                    continue
             else:
-                Name = "({}){}".format(illust["ID"], illust["Title"].replace("/","-"))
-                if illust["Page_Count"] > 1:
+                Name = "({}){}".format(illust["ID"], illust["Title"])
+                if illust["Muti_Page"]:
                     url = illust["Image_Urls"]
-                    name = "{}{}".format(Name, url[0]["image_urls"]["original"][-4:])
-                    self.Pic_Download(url, name, path_Add = DP, s = True)
+                    name = []
+                    file_name = "{}{}".format(Name, url[0][-4:])
+                    for i in range(len(url)):
+                        name.append("{}_P{}{}".format(file_name[:-4], i, file_name[-4:]))     
+                    for i in range(5,len(url),5):
+                        Threads = []
+                        for j in range(5):
+                            Threads.append(threading.Thread(target = self.Pic_Download, args = (url[i+j-5], name[i+j-5], DP)))
+                        for Thread in Threads:  Thread.start()
+                        for Thread in Threads:  Thread.join()                                                       
+#                    print("\n图片集 {} 下载完成".format(file_name[:-4]))
+                elif illust["Ugoira"]:
+                    url = illust["Image_Urls"][0]
+                    name = "{}@{}ms{}".format(Name, illust["Image_Urls"][1], url[-4:])
+                    self.Gif_Threads_Pool.append(threading.Thread(target = self.Gif_Download, args = (url, name, DP)))
+                    self.Gif_Threads_Pool[-1].start()
+                    if len(self.Gif_Threads_Pool) == 10:
+                        for Thread in self.Gif_Threads_Pool:     Thread.join()
+                        self.Gif_Threads_Pool = []
+                    #self.Gif_Download(url, name, Dir_Path = DP)
                 else:
                     url = illust["Image_Urls"]
-                    name = "{}{}".format(Name, url["original_image_url"][-4:])
-                    self.Pic_Download(url, name, path_Add = DP)
+                    name = "{}{}".format(Name, url[-4:])
+                    self.Pic_Download(url, name, Dir_Path = DP)
+            print("\r剩余{}副作品未下载".format(Total_Illusts - n), end="")
+
+    def Bookemark_Download(self):
+        Illust_List = self.Load_List("Bookmark_List_cache")
+        Total_Illusts = len(Illust_List)
+
+        self.Check_Pach()
+        DP = "Bookmark_Public\\"
+        isExists = op.exists(self.Download_path + DP)
+        if not isExists:
+            os.makedirs(self.Download_path + DP) 
+            
+        n = 0
+        for illust in Illust_List:
+            print("\r剩余{}副作品未下载".format(Total_Illusts - n), end="")
+            n += 1
+            Name = "({}){}".format(illust["ID"], illust["Title"])
+            if illust["Muti_Page"]:
+                url = illust["Image_Urls"]
+                name = []
+                file_name = "{}{}".format(Name, url[0][-4:])
+                for i in range(len(url)):
+                    name.append("{}_P{}{}".format(file_name[:-4], i, file_name[-4:]))     
+                for i in range(5,len(url),5):
+                    Threads = []
+                    for j in range(i):
+                        Threads.append(threading.Thread(target = self.Pic_Download, args = (url[j], name[j], DP)))
+                    for Thread in Threads:  Thread.start()
+                    for Thread in Threads:  Thread.join()                                                       
+#                print("\n图片集 {} 下载完成".format(file_name[:-4]))
+            elif illust["Ugoira"]:
+                url = illust["Image_Urls"][0]
+                name = "{}@{}ms{}".format(Name, illust["Image_Urls"][1], url[-4:])
+                self.Gif_Threads_Pool.append(threading.Thread(target = self.Gif_Download, args = (url, name, DP)))
+                self.Gif_Threads_Pool[-1].start()
+                if len(self.Gif_Threads_Pool) == 10:
+                    for Thread in self.Gif_Threads_Pool:     Thread.join()
+                    self.Gif_Threads_Pool = []
+#                self.Gif_Download(url, name, Dir_Path = DP)
+            else:
+                url = illust["Image_Urls"]
+                name = "{}{}".format(Name, url[-4:])
+                self.Pic_Download(url, name, Dir_Path = DP)
 
     def Load_List(self, File_Name):
         path = "{}\\Cache\\{}".format(self.root, File_Name)
